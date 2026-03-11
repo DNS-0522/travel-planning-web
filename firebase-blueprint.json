@@ -36,6 +36,33 @@
         "notes": { "type": "string" }
       },
       "required": ["trip_id", "place_name", "lat", "lng", "order_index"]
+    },
+    "ExpenseItem": {
+      "title": "ExpenseItem",
+      "description": "An expense item in the trip",
+      "type": "object",
+      "properties": {
+        "trip_id": { "type": "string" },
+        "day_id": { "type": "string" },
+        "item_name": { "type": "string" },
+        "amount": { "type": "number" },
+        "payer": { "type": "string" },
+        "order_index": { "type": "number" }
+      },
+      "required": ["trip_id", "day_id", "item_name", "amount", "payer", "order_index"]
+    },
+    "PackingItem": {
+      "title": "PackingItem",
+      "description": "A packing list item in the trip",
+      "type": "object",
+      "properties": {
+        "trip_id": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "is_checked": { "type": "boolean" },
+        "order_index": { "type": "number" }
+      },
+      "required": ["trip_id", "name", "quantity", "is_checked", "order_index"]
     }
   },
   "firestore": {
@@ -50,6 +77,14 @@
     "/trips/{tripId}/items/{itemId}": {
       "schema": { "$ref": "ItineraryItem" },
       "description": "Itinerary items"
+    },
+    "/trips/{tripId}/expenses/{expenseId}": {
+      "schema": { "$ref": "ExpenseItem" },
+      "description": "Trip expenses"
+    },
+    "/trips/{tripId}/packingList/{itemId}": {
+      "schema": { "$ref": "PackingItem" },
+      "description": "Trip packing list items"
     },
     "/trips/{tripId}/collaborators/{userId}": {
       "schema": { "$ref": "User" },

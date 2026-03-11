@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus, Sparkles, Loader2 } from 'lucide-react';
+import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus, Edit2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import MapView from './Map';
 import { db, auth } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, getDocs, writeBatch, orderBy, getDoc, setDoc, or, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { GoogleGenAI, Type } from "@google/genai";
 
 enum OperationType {
   CREATE = 'create',
@@ -69,6 +68,9 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   const [selectedTrip, setSelectedTrip] = useState<any>(null);
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [packingItems, setPackingItems] = useState<any[]>([]);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'itinerary' | 'expenses' | 'packing'>('itinerary');
   const [loading, setLoading] = useState(true);
   const [travelMode, setTravelMode] = useState<string>('DRIVING');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -83,9 +85,10 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTripTitle, setNewTripTitle] = useState('');
-  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [tripToDeleteId, setTripToDeleteId] = useState('');
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameTripTitle, setRenameTripTitle] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -149,6 +152,26 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         setItems(itemsData);
       });
 
+      const expensesQ = query(collection(db, 'trips', selectedTrip.id, 'expenses'), orderBy('order_index'));
+      const unsubscribeExpenses = onSnapshot(expensesQ, (snapshot) => {
+        const uniqueExpenses = new Map();
+        snapshot.docs.forEach(doc => {
+          uniqueExpenses.set(doc.id, { id: doc.id, ...doc.data() });
+        });
+        const expensesData = Array.from(uniqueExpenses.values());
+        setExpenses(expensesData);
+      });
+
+      const packingQ = query(collection(db, 'trips', selectedTrip.id, 'packingList'), orderBy('order_index'));
+      const unsubscribePacking = onSnapshot(packingQ, (snapshot) => {
+        const uniquePacking = new Map();
+        snapshot.docs.forEach(doc => {
+          uniquePacking.set(doc.id, { id: doc.id, ...doc.data() });
+        });
+        const packingData = Array.from(uniquePacking.values());
+        setPackingItems(packingData);
+      });
+
       const collabQ = query(collection(db, 'trips', selectedTrip.id, 'collaborators'));
       const unsubscribeCollab = onSnapshot(collabQ, (snapshot) => {
         const uniqueCollabs = new Map();
@@ -169,22 +192,16 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         days = [];
       }
       
-      const checkAndInitializeDays = async () => {
-        if (days.length === 0 && selectedTrip.id) {
-          const tripRef = doc(db, 'trips', selectedTrip.id);
-          const tripSnap = await getDoc(tripRef);
-          if (tripSnap.exists() && (!tripSnap.data().days || JSON.parse(tripSnap.data().days).length === 0)) {
-            handleUpdateTripDays([{ id: Date.now().toString(), title: 'Day 1' }]);
-          }
-        } else if (!selectedDayId && days.length > 0) {
-          setSelectedDayId(days[0].id);
-        }
-      };
-      
-      checkAndInitializeDays();
+      if (days.length === 0) {
+        handleUpdateTripDays([{ id: Date.now().toString(), title: 'Day 1' }]);
+      } else if (!selectedDayId) {
+        setSelectedDayId(days[0].id);
+      }
 
       return () => {
         unsubscribeItems();
+        unsubscribeExpenses();
+        unsubscribePacking();
         unsubscribeCollab();
       };
     } else {
@@ -269,14 +286,47 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
     if (!newTripTitle.trim()) return;
 
     try {
-      const newTrip = await addDoc(collection(db, 'trips'), {
+      const newTripRef = await addDoc(collection(db, 'trips'), {
         title: newTripTitle.trim(),
         user_id: user.uid,
         collaborator_ids: [],
         days: JSON.stringify([{ id: Date.now().toString(), title: 'Day 1' }])
       }).catch(err => { handleFirestoreError(err, OperationType.CREATE, 'trips'); throw err; });
+
+      // Add default packing items
+      const batch = writeBatch(db);
+      const defaultPackingItems = [
+        { name: '身分證/護照', quantity: 1, is_checked: false, category: '出行必備' },
+        { name: '國際駕照', quantity: 1, is_checked: false, category: '出行必備' },
+        { name: '信用卡/現金', quantity: 1, is_checked: false, category: '出行必備' },
+        { name: '旅平險', quantity: 1, is_checked: false, category: '出行必備' },
+        { name: '毛巾', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '牙膏/牙刷', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '洗面乳', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '紙巾/濕紙巾', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '刮鬍刀', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '衛生棉', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '化妝品', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '防曬乳', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '水壺/保溫杯', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '隱形/保養液', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '眼鏡盒', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '購物袋', quantity: 1, is_checked: false, category: '生活日用' },
+      ];
+
+      defaultPackingItems.forEach((item, index) => {
+        const itemRef = doc(collection(db, 'trips', newTripRef.id, 'packingList'));
+        batch.set(itemRef, {
+          ...item,
+          trip_id: newTripRef.id,
+          order_index: index
+        });
+      });
+
+      await batch.commit().catch(err => { handleFirestoreError(err, OperationType.WRITE, `trips/${newTripRef.id}/packingList`); throw err; });
+
       setSelectedTrip({ 
-        id: newTrip.id, 
+        id: newTripRef.id, 
         title: newTripTitle.trim(), 
         user_id: user.uid, 
         collaborator_ids: [],
@@ -286,154 +336,6 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       setNewTripTitle('');
     } catch (err) {
       console.error('Failed to create trip', err);
-    }
-  };
-
-  const handleAICreateTrip = async () => {
-    if (!newTripTitle.trim()) return;
-    setIsGeneratingAI(true);
-
-    try {
-      // 1. Parse number of days from title (Support digits and complex Chinese numbers)
-      const title = newTripTitle.trim();
-      
-      const parseChineseNumber = (str: string): number => {
-        const map: { [key: string]: number } = {
-          '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
-        };
-        if (/^\d+$/.test(str)) return parseInt(str, 10);
-        
-        if (str === '十') return 10;
-        if (str.length === 2 && str[0] === '十') return 10 + (map[str[1]] || 0);
-        if (str.length === 2 && str[1] === '十') return (map[str[0]] || 0) * 10;
-        if (str.length === 3 && str[1] === '十') return (map[str[0]] || 0) * 10 + (map[str[2]] || 0);
-        
-        return map[str] || 1;
-      };
-      
-      const dayMatch = title.match(/(\d+|[一二三四五六七八九十]+)\s*(日|day)/i);
-      const numDays = dayMatch ? parseChineseNumber(dayMatch[1]) : 1;
-      const limitedDays = Math.min(Math.max(numDays, 1), 14); // Increased limit to 14 days
-
-      // 2. Prepare days structure
-      const days = [];
-      const now = Date.now();
-      for (let i = 1; i <= limitedDays; i++) {
-        days.push({ id: `${now}-${i}`, title: `Day ${i}` });
-      }
-
-      // 3. Call Gemini to generate itinerary items for multiple days
-      // Using gemini-3-flash-preview for faster response on mobile
-      let apiKey = process.env.GEMINI_API_KEY || (process.env as any).API_KEY;
-      
-      // If key is missing and we are in AI Studio, prompt for key
-      if (!apiKey && window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          await window.aistudio.openSelectKey();
-          // After opening, we assume the key will be available in process.env.API_KEY on next attempt
-          // but for this attempt we might still fail if we don't wait.
-          // However, the instructions say to proceed.
-          apiKey = (process.env as any).API_KEY;
-        }
-      }
-
-      if (!apiKey) {
-        throw new Error('MISSING_API_KEY');
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `為名為「${title}」的行程規劃一份詳細的景點清單。這是一個 ${limitedDays} 天的行程。請為每一天提供約 2-4 個推薦景點。對於每個景點，請提供名稱、建議停留時間（分鐘）、建議開始時間（24小時制 HH:MM 格式，從早上 09:00 開始安排）以及它屬於第幾天（day_index，從 1 開始）。`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                place_name: { type: Type.STRING, description: "景點名稱" },
-                stay_duration: { type: Type.STRING, description: "停留時間（分鐘），僅數字字串" },
-                travel_time: { type: Type.STRING, description: "開始時間，格式為 HH:MM" },
-                day_index: { type: Type.INTEGER, description: "第幾天，從 1 開始" }
-              },
-              required: ["place_name", "stay_duration", "travel_time", "day_index"]
-            }
-          }
-        }
-      });
-
-      let aiItems = [];
-      try {
-        aiItems = JSON.parse(response.text || "[]");
-      } catch (parseErr) {
-        console.error('Failed to parse AI response', response.text);
-        // Attempt to extract JSON if it's wrapped in markdown
-        const jsonMatch = response.text?.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          aiItems = JSON.parse(jsonMatch[0]);
-        } else {
-          throw new Error('AI 回傳格式錯誤');
-        }
-      }
-      
-      // 4. Create the trip first
-      const newTripRef = await addDoc(collection(db, 'trips'), {
-        title: title,
-        user_id: user.uid,
-        collaborator_ids: [],
-        days: JSON.stringify(days)
-      }).catch(err => { handleFirestoreError(err, OperationType.CREATE, 'trips'); throw err; });
-
-      // 5. Add generated items to Firestore, mapping day_index to day.id
-      const batch = writeBatch(db);
-      aiItems.forEach((item: any, index: number) => {
-        const dayIdx = (item.day_index || 1) - 1;
-        const targetDay = days[dayIdx] || days[0];
-        
-        const itemRef = doc(collection(db, 'trips', newTripRef.id, 'items'));
-        batch.set(itemRef, {
-          place_name: item.place_name,
-          stay_duration: String(item.stay_duration),
-          travel_time: item.travel_time,
-          trip_id: newTripRef.id,
-          day_id: targetDay.id,
-          order_index: index,
-          lat: 0,
-          lng: 0
-        });
-      });
-      await batch.commit().catch(err => { handleFirestoreError(err, OperationType.WRITE, `trips/${newTripRef.id}/items`); throw err; });
-
-      // 6. Update local state to trigger UI update
-      const newTripData = {
-        id: newTripRef.id,
-        title: title,
-        user_id: user.uid,
-        collaborator_ids: [],
-        days: JSON.stringify(days)
-      };
-      
-      setSelectedTrip(newTripData);
-      setSelectedDayId(days[0].id);
-      setIsModalOpen(false);
-      setNewTripTitle('');
-    } catch (err: any) {
-      console.error('AI generation failed', err);
-      let errorMsg = 'AI 規劃失敗，請稍後再試。';
-      if (err.message === 'MISSING_API_KEY') {
-        errorMsg = '未偵測到 Gemini API 金鑰。如果您是在本地執行或部署，請確保已設定 GEMINI_API_KEY 環境變數。';
-      } else if (err.message?.includes('format') || err.message?.includes('格式')) {
-        errorMsg = 'AI 回傳資料格式有誤，請再試一次。';
-      } else if (err.message?.includes('quota') || err.message?.includes('limit')) {
-        errorMsg = 'AI 服務暫時忙碌，請稍候再試。';
-      } else if (!navigator.onLine) {
-        errorMsg = '網路連線不穩定，請檢查您的網路設定。';
-      }
-      alert(errorMsg);
-    } finally {
-      setIsGeneratingAI(false);
     }
   };
 
@@ -453,6 +355,23 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       setTripToDeleteId('');
     } catch (err) {
       console.error('Failed to delete trip', err);
+    }
+  };
+
+  const handleRenameTrip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTrip || !renameTripTitle.trim()) return;
+
+    try {
+      await updateDoc(doc(db, 'trips', selectedTrip.id), {
+        title: renameTripTitle.trim()
+      }).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}`); throw err; });
+
+      setSelectedTrip({ ...selectedTrip, title: renameTripTitle.trim() });
+      setIsRenameModalOpen(false);
+      setRenameTripTitle('');
+    } catch (error) {
+      console.error('Error renaming trip:', error);
     }
   };
 
@@ -497,6 +416,97 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       await updateDoc(doc(db, 'trips', selectedTrip.id, 'items', itemId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/items/${itemId}`); throw err; });
     } catch (err) {
       console.error('Failed to update item', err);
+    }
+  };
+
+  const handleAddExpense = async (expenseData: any) => {
+    if (!selectedTrip) return;
+    try {
+      await addDoc(collection(db, 'trips', selectedTrip.id, 'expenses'), expenseData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/expenses`); throw err; });
+    } catch (err) {
+      console.error('Failed to add expense', err);
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId: string) => {
+    if (!selectedTrip) return;
+    try {
+      await deleteDoc(doc(db, 'trips', selectedTrip.id, 'expenses', expenseId)).catch(err => { handleFirestoreError(err, OperationType.DELETE, `trips/${selectedTrip.id}/expenses/${expenseId}`); throw err; });
+    } catch (err) {
+      console.error('Failed to delete expense', err);
+    }
+  };
+
+  const handleUpdateExpense = async (expenseId: string, updates: any) => {
+    if (!selectedTrip) return;
+    try {
+      await updateDoc(doc(db, 'trips', selectedTrip.id, 'expenses', expenseId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/expenses/${expenseId}`); throw err; });
+    } catch (err) {
+      console.error('Failed to update expense', err);
+    }
+  };
+
+  const handleReorderExpenses = async (reorderedExpenses: any[]) => {
+    if (!selectedTrip) return;
+
+    const batch = writeBatch(db);
+    reorderedExpenses.forEach((expense, index) => {
+      const expenseRef = doc(db, 'trips', selectedTrip.id, 'expenses', expense.id);
+      batch.update(expenseRef, {
+        order_index: index,
+        day_id: expense.day_id,
+      });
+    });
+
+    try {
+      await batch.commit().catch(err => { handleFirestoreError(err, OperationType.WRITE, `trips/${selectedTrip.id}/expenses`); throw err; });
+    } catch (err) {
+      console.error('Failed to reorder expenses', err);
+    }
+  };
+
+  const handleAddPackingItem = async (packingData: any) => {
+    if (!selectedTrip) return;
+    try {
+      await addDoc(collection(db, 'trips', selectedTrip.id, 'packingList'), packingData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/packingList`); throw err; });
+    } catch (err) {
+      console.error('Failed to add packing item', err);
+    }
+  };
+
+  const handleDeletePackingItem = async (itemId: string) => {
+    if (!selectedTrip) return;
+    try {
+      await deleteDoc(doc(db, 'trips', selectedTrip.id, 'packingList', itemId)).catch(err => { handleFirestoreError(err, OperationType.DELETE, `trips/${selectedTrip.id}/packingList/${itemId}`); throw err; });
+    } catch (err) {
+      console.error('Failed to delete packing item', err);
+    }
+  };
+
+  const handleUpdatePackingItem = async (itemId: string, updates: any) => {
+    if (!selectedTrip) return;
+    try {
+      await updateDoc(doc(db, 'trips', selectedTrip.id, 'packingList', itemId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/packingList/${itemId}`); throw err; });
+    } catch (err) {
+      console.error('Failed to update packing item', err);
+    }
+  };
+
+  const handleReorderPackingItems = async (reorderedItems: any[]) => {
+    if (!selectedTrip) return;
+
+    const batch = writeBatch(db);
+    reorderedItems.forEach((item, index) => {
+      const itemRef = doc(db, 'trips', selectedTrip.id, 'packingList', item.id);
+      batch.update(itemRef, {
+        order_index: index,
+      });
+    });
+
+    try {
+      await batch.commit().catch(err => { handleFirestoreError(err, OperationType.WRITE, `trips/${selectedTrip.id}/packingList`); throw err; });
+    } catch (err) {
+      console.error('Failed to reorder packing items', err);
     }
   };
 
@@ -570,6 +580,18 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                 >
                   <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
+                {selectedTrip && (
+                  <button
+                    onClick={() => {
+                      setRenameTripTitle(selectedTrip.title);
+                      setIsRenameModalOpen(true);
+                    }}
+                    className="p-1.5 hover:bg-white/20 rounded-full transition-colors"
+                    title="重新命名行程"
+                  >
+                    <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setTripToDeleteId(selectedTrip?.id || '');
@@ -639,6 +661,18 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                 onUpdateItem={handleUpdateItem}
                 selectedDayId={selectedDayId}
                 setSelectedDayId={setSelectedDayId}
+                expenses={expenses}
+                onAddExpense={handleAddExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onUpdateExpense={handleUpdateExpense}
+                onReorderExpenses={handleReorderExpenses}
+                packingItems={packingItems}
+                onAddPackingItem={handleAddPackingItem}
+                onDeletePackingItem={handleDeletePackingItem}
+                onUpdatePackingItem={handleUpdatePackingItem}
+                onReorderPackingItems={handleReorderPackingItems}
+                activeTab={activeSidebarTab}
+                setActiveTab={setActiveSidebarTab}
               />
             </div>
             <div className={`${mobileView === 'map' ? 'block' : 'hidden'} sm:block flex-1 relative h-full`}>
@@ -708,38 +742,67 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                   onChange={(e) => setNewTripTitle(e.target.value)}
                 />
               </div>
-              <div className="flex flex-col gap-3">
-                <button
-                  type="submit"
-                  disabled={isGeneratingAI || !newTripTitle.trim()}
-                  className="w-full py-2.5 px-4 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  建立空白行程
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAICreateTrip}
-                  disabled={isGeneratingAI || !newTripTitle.trim()}
-                  className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-md hover:from-indigo-600 hover:to-purple-700 font-medium transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50"
-                >
-                  {isGeneratingAI ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      AI 規劃中...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      AI 快速規劃
-                    </>
-                  )}
-                </button>
+              <div className="flex justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="w-full py-2 px-4 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700"
                 >
                   取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700"
+                >
+                  建立行程
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Trip Modal */}
+      {isRenameModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">重新命名行程</h3>
+              <button
+                onClick={() => setIsRenameModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleRenameTrip} className="p-4">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  行程名稱
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="例如：日本五日遊"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={renameTripTitle}
+                  onChange={(e) => setRenameTripTitle(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsRenameModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700"
+                >
+                  儲存
                 </button>
               </div>
             </form>
