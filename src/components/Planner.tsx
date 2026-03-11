@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus } from 'lucide-react';
+import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus, Sparkles, Loader2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import MapView from './Map';
 import { db, auth } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, getDocs, writeBatch, orderBy, getDoc, setDoc, or, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { GoogleGenAI, Type } from "@google/genai";
 
 enum OperationType {
   CREATE = 'create',
@@ -82,6 +83,7 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTripTitle, setNewTripTitle] = useState('');
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [tripToDeleteId, setTripToDeleteId] = useState('');
 
@@ -167,11 +169,19 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         days = [];
       }
       
-      if (days.length === 0) {
-        handleUpdateTripDays([{ id: Date.now().toString(), title: 'Day 1' }]);
-      } else if (!selectedDayId) {
-        setSelectedDayId(days[0].id);
-      }
+      const checkAndInitializeDays = async () => {
+        if (days.length === 0 && selectedTrip.id) {
+          const tripRef = doc(db, 'trips', selectedTrip.id);
+          const tripSnap = await getDoc(tripRef);
+          if (tripSnap.exists() && (!tripSnap.data().days || JSON.parse(tripSnap.data().days).length === 0)) {
+            handleUpdateTripDays([{ id: Date.now().toString(), title: 'Day 1' }]);
+          }
+        } else if (!selectedDayId && days.length > 0) {
+          setSelectedDayId(days[0].id);
+        }
+      };
+      
+      checkAndInitializeDays();
 
       return () => {
         unsubscribeItems();
@@ -276,6 +286,113 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       setNewTripTitle('');
     } catch (err) {
       console.error('Failed to create trip', err);
+    }
+  };
+
+  const handleAICreateTrip = async () => {
+    if (!newTripTitle.trim()) return;
+    setIsGeneratingAI(true);
+
+    try {
+      // 1. Parse number of days from title (Support digits and complex Chinese numbers)
+      const title = newTripTitle.trim();
+      
+      const parseChineseNumber = (str: string): number => {
+        const map: { [key: string]: number } = {
+          '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
+        };
+        if (/^\d+$/.test(str)) return parseInt(str, 10);
+        
+        if (str === '十') return 10;
+        if (str.length === 2 && str[0] === '十') return 10 + (map[str[1]] || 0);
+        if (str.length === 2 && str[1] === '十') return (map[str[0]] || 0) * 10;
+        if (str.length === 3 && str[1] === '十') return (map[str[0]] || 0) * 10 + (map[str[2]] || 0);
+        
+        return map[str] || 1;
+      };
+      
+      const dayMatch = title.match(/(\d+|[一二三四五六七八九十]+)\s*(日|day)/i);
+      const numDays = dayMatch ? parseChineseNumber(dayMatch[1]) : 1;
+      const limitedDays = Math.min(Math.max(numDays, 1), 14); // Increased limit to 14 days
+
+      // 2. Prepare days structure
+      const days = [];
+      const now = Date.now();
+      for (let i = 1; i <= limitedDays; i++) {
+        days.push({ id: `${now}-${i}`, title: `Day ${i}` });
+      }
+
+      // 3. Call Gemini to generate itinerary items for multiple days
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
+        contents: `為名為「${title}」的行程規劃一份詳細的景點清單。這是一個 ${limitedDays} 天的行程。請為每一天提供約 2-4 個推薦景點。對於每個景點，請提供名稱、建議停留時間（分鐘）、建議開始時間（24小時制 HH:MM 格式，從早上 09:00 開始安排）以及它屬於第幾天（day_index，從 1 開始）。`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                place_name: { type: Type.STRING, description: "景點名稱" },
+                stay_duration: { type: Type.STRING, description: "停留時間（分鐘），僅數字字串" },
+                travel_time: { type: Type.STRING, description: "開始時間，格式為 HH:MM" },
+                day_index: { type: Type.INTEGER, description: "第幾天，從 1 開始" }
+              },
+              required: ["place_name", "stay_duration", "travel_time", "day_index"]
+            }
+          }
+        }
+      });
+
+      const aiItems = JSON.parse(response.text || "[]");
+      
+      // 4. Create the trip first
+      const newTripRef = await addDoc(collection(db, 'trips'), {
+        title: title,
+        user_id: user.uid,
+        collaborator_ids: [],
+        days: JSON.stringify(days)
+      }).catch(err => { handleFirestoreError(err, OperationType.CREATE, 'trips'); throw err; });
+
+      // 5. Add generated items to Firestore, mapping day_index to day.id
+      const batch = writeBatch(db);
+      aiItems.forEach((item: any, index: number) => {
+        const dayIdx = (item.day_index || 1) - 1;
+        const targetDay = days[dayIdx] || days[0];
+        
+        const itemRef = doc(collection(db, 'trips', newTripRef.id, 'items'));
+        batch.set(itemRef, {
+          place_name: item.place_name,
+          stay_duration: String(item.stay_duration),
+          travel_time: item.travel_time,
+          trip_id: newTripRef.id,
+          day_id: targetDay.id,
+          order_index: index,
+          lat: 0,
+          lng: 0
+        });
+      });
+      await batch.commit().catch(err => { handleFirestoreError(err, OperationType.WRITE, `trips/${newTripRef.id}/items`); throw err; });
+
+      // 6. Update local state to trigger UI update
+      const newTripData = {
+        id: newTripRef.id,
+        title: title,
+        user_id: user.uid,
+        collaborator_ids: [],
+        days: JSON.stringify(days)
+      };
+      
+      setSelectedTrip(newTripData);
+      setSelectedDayId(days[0].id);
+      setIsModalOpen(false);
+      setNewTripTitle('');
+    } catch (err) {
+      console.error('AI generation failed', err);
+      alert('AI 規劃失敗，請稍後再試或手動建立行程。');
+    } finally {
+      setIsGeneratingAI(false);
     }
   };
 
@@ -550,19 +667,38 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                   onChange={(e) => setNewTripTitle(e.target.value)}
                 />
               </div>
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-col gap-3">
+                <button
+                  type="submit"
+                  disabled={isGeneratingAI || !newTripTitle.trim()}
+                  className="w-full py-2.5 px-4 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  建立空白行程
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAICreateTrip}
+                  disabled={isGeneratingAI || !newTripTitle.trim()}
+                  className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-md hover:from-indigo-600 hover:to-purple-700 font-medium transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50"
+                >
+                  {isGeneratingAI ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      AI 規劃中...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      AI 快速規劃
+                    </>
+                  )}
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700"
+                  className="w-full py-2 px-4 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
                 >
                   取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700"
-                >
-                  建立行程
                 </button>
               </div>
             </form>
