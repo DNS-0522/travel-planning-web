@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["user", "admin"] }
+      },
+      "required": ["email", "role"]
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "A travel trip",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "collaborator_ids": { "type": "array", "items": { "type": "string" } },
+        "title": { "type": "string" },
+        "days": { "type": "string" }
+      },
+      "required": ["user_id", "title"]
+    },
+    "ItineraryItem": {
+      "title": "ItineraryItem",
+      "description": "An item in the itinerary",
+      "type": "object",
+      "properties": {
+        "trip_id": { "type": "string" },
+        "day_id": { "type": "string" },
+        "place_name": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "order_index": { "type": "number" }
+      },
+      "required": ["trip_id", "place_name", "lat", "lng", "order_index"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "User profiles"
+    },
+    "/trips/{tripId}": {
+      "schema": { "$ref": "Trip" },
+      "description": "Trips"
+    },
+    "/trips/{tripId}/items/{itemId}": {
+      "schema": { "$ref": "ItineraryItem" },
+      "description": "Itinerary items"
+    },
+    "/trips/{tripId}/collaborators/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "Trip collaborators"
+    }
+  }
+}
