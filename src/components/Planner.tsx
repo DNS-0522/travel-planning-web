@@ -323,9 +323,10 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       }
 
       // 3. Call Gemini to generate itinerary items for multiple days
+      // Using gemini-3-flash-preview for faster response on mobile
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: `為名為「${title}」的行程規劃一份詳細的景點清單。這是一個 ${limitedDays} 天的行程。請為每一天提供約 2-4 個推薦景點。對於每個景點，請提供名稱、建議停留時間（分鐘）、建議開始時間（24小時制 HH:MM 格式，從早上 09:00 開始安排）以及它屬於第幾天（day_index，從 1 開始）。`,
         config: {
           responseMimeType: "application/json",
@@ -345,7 +346,19 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         }
       });
 
-      const aiItems = JSON.parse(response.text || "[]");
+      let aiItems = [];
+      try {
+        aiItems = JSON.parse(response.text || "[]");
+      } catch (parseErr) {
+        console.error('Failed to parse AI response', response.text);
+        // Attempt to extract JSON if it's wrapped in markdown
+        const jsonMatch = response.text?.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          aiItems = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('AI 回傳格式錯誤');
+        }
+      }
       
       // 4. Create the trip first
       const newTripRef = await addDoc(collection(db, 'trips'), {
@@ -388,9 +401,17 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       setSelectedDayId(days[0].id);
       setIsModalOpen(false);
       setNewTripTitle('');
-    } catch (err) {
+    } catch (err: any) {
       console.error('AI generation failed', err);
-      alert('AI 規劃失敗，請稍後再試或手動建立行程。');
+      let errorMsg = 'AI 規劃失敗，請稍後再試。';
+      if (err.message?.includes('format') || err.message?.includes('格式')) {
+        errorMsg = 'AI 回傳資料格式有誤，請再試一次。';
+      } else if (err.message?.includes('quota') || err.message?.includes('limit')) {
+        errorMsg = 'AI 服務暫時忙碌，請稍候再試。';
+      } else if (!navigator.onLine) {
+        errorMsg = '網路連線不穩定，請檢查您的網路設定。';
+      }
+      alert(errorMsg);
     } finally {
       setIsGeneratingAI(false);
     }
