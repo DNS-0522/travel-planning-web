@@ -324,7 +324,25 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
       // 3. Call Gemini to generate itinerary items for multiple days
       // Using gemini-3-flash-preview for faster response on mobile
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      let apiKey = process.env.GEMINI_API_KEY || (process.env as any).API_KEY;
+      
+      // If key is missing and we are in AI Studio, prompt for key
+      if (!apiKey && window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          await window.aistudio.openSelectKey();
+          // After opening, we assume the key will be available in process.env.API_KEY on next attempt
+          // but for this attempt we might still fail if we don't wait.
+          // However, the instructions say to proceed.
+          apiKey = (process.env as any).API_KEY;
+        }
+      }
+
+      if (!apiKey) {
+        throw new Error('MISSING_API_KEY');
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `為名為「${title}」的行程規劃一份詳細的景點清單。這是一個 ${limitedDays} 天的行程。請為每一天提供約 2-4 個推薦景點。對於每個景點，請提供名稱、建議停留時間（分鐘）、建議開始時間（24小時制 HH:MM 格式，從早上 09:00 開始安排）以及它屬於第幾天（day_index，從 1 開始）。`,
@@ -404,7 +422,9 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
     } catch (err: any) {
       console.error('AI generation failed', err);
       let errorMsg = 'AI 規劃失敗，請稍後再試。';
-      if (err.message?.includes('format') || err.message?.includes('格式')) {
+      if (err.message === 'MISSING_API_KEY') {
+        errorMsg = '未偵測到 Gemini API 金鑰。如果您是在本地執行或部署，請確保已設定 GEMINI_API_KEY 環境變數。';
+      } else if (err.message?.includes('format') || err.message?.includes('格式')) {
         errorMsg = 'AI 回傳資料格式有誤，請再試一次。';
       } else if (err.message?.includes('quota') || err.message?.includes('limit')) {
         errorMsg = 'AI 服務暫時忙碌，請稍候再試。';

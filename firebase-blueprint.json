@@ -32,7 +32,8 @@
         "place_name": { "type": "string" },
         "lat": { "type": "number" },
         "lng": { "type": "number" },
-        "order_index": { "type": "number" }
+        "order_index": { "type": "number" },
+        "notes": { "type": "string" }
       },
       "required": ["trip_id", "place_name", "lat", "lng", "order_index"]
     }

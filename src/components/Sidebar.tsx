@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult, DraggableProvided, DraggableStateSnapshot } from '@hello-pangea/dnd';
-import { GripVertical, Trash2, MapPin, Clock, Calendar, Plus, X, Edit2, Check, ChevronDown } from 'lucide-react';
+import { GripVertical, Trash2, MapPin, Clock, Calendar, Plus, X, Edit2, Check, ChevronDown, FileText } from 'lucide-react';
 
 interface SidebarProps {
   selectedTrip: any;
@@ -73,6 +73,9 @@ export default function Sidebar({
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editStayDuration, setEditStayDuration] = useState('');
   const [editTravelTime, setEditTravelTime] = useState('');
+  const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
+  const [noteEditingItem, setNoteEditingItem] = useState<any>(null);
+  const [noteText, setNoteText] = useState('');
 
   const calculateEndTime = (startTime: string, durationMinutes: string) => {
     if (!startTime || !durationMinutes) return null;
@@ -126,6 +129,7 @@ export default function Sidebar({
         stay_duration: stayDuration,
         travel_time: travelTime,
         day_id: selectedDayId,
+        notes: '',
       });
       setInputValue('');
       setStayDuration('');
@@ -186,6 +190,23 @@ export default function Sidebar({
       day_id: item.day_id,
     });
     setEditingItemId(null);
+  };
+
+  const openNotesModal = (item: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNoteEditingItem(item);
+    setNoteText(item.notes || '');
+    setIsNotesModalOpen(true);
+  };
+
+  const saveNotes = () => {
+    if (noteEditingItem) {
+      onUpdateItem(noteEditingItem.id, {
+        notes: noteText
+      });
+      setIsNotesModalOpen(false);
+      setNoteEditingItem(null);
+    }
   };
 
   return (
@@ -421,12 +442,28 @@ export default function Sidebar({
                                     停留 {item.stay_duration} 分鐘
                                   </span>
                                 )}
+                                {item.notes && (
+                                  <span className="flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded italic">
+                                    <FileText className="w-3 h-3" /> 有筆記
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>
                           
                           {editingItemId !== item.id && (
                             <div className="flex flex-col gap-1">
+                              <button
+                                onClick={(e) => openNotesModal(item, e)}
+                                className={`p-1 rounded-md transition-colors ${
+                                  item.notes 
+                                    ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' 
+                                    : 'text-slate-400 dark:text-slate-500 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'
+                                }`}
+                                title="詳細筆記"
+                              >
+                                <FileText className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={(e) => startEditing(item, e)}
                                 className="text-slate-400 dark:text-slate-500 hover:text-indigo-500 p-1 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
@@ -457,6 +494,53 @@ export default function Sidebar({
           )}
         </div>
       </DragDropContext>
+
+      {/* Notes Modal */}
+      {isNotesModalOpen && noteEditingItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[200px] sm:max-w-xs">
+                  {noteEditingItem.place_name} - 詳細筆記
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsNotesModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 flex-1 overflow-y-auto">
+              <textarea
+                className="w-full h-64 p-3 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
+                placeholder="在此輸入詳細筆記、預約資訊、交通方式等..."
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
+              <button
+                onClick={() => setIsNotesModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={saveNotes}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 flex items-center gap-2"
+              >
+                <Check className="w-4 h-4" /> 儲存筆記
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
