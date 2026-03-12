@@ -998,7 +998,7 @@ export default function Sidebar({
                                     <div className="flex-1 min-w-0 flex items-center gap-3">
                                       <input
                                         type="checkbox"
-                                        checked={item.is_checked}
+                                        checked={!!item.is_checked}
                                         onChange={() => togglePackingItem(item)}
                                         className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                                       />

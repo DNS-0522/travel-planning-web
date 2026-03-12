@@ -512,6 +512,10 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleDeletePackingItem = async (itemId: string) => {
     if (!selectedTrip) return;
+    
+    // Optimistic update
+    setPackingItems(prev => prev.filter(item => item.id !== itemId));
+
     try {
       await deleteDoc(doc(db, 'trips', selectedTrip.id, 'packingList', itemId)).catch(err => { handleFirestoreError(err, OperationType.DELETE, `trips/${selectedTrip.id}/packingList/${itemId}`); throw err; });
     } catch (err) {
@@ -521,6 +525,12 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleUpdatePackingItem = async (itemId: string, updates: any) => {
     if (!selectedTrip) return;
+    
+    // Optimistic update for immediate UI feedback
+    setPackingItems(prev => prev.map(item => 
+      item.id === itemId ? { ...item, ...updates } : item
+    ));
+
     try {
       await updateDoc(doc(db, 'trips', selectedTrip.id, 'packingList', itemId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/packingList/${itemId}`); throw err; });
     } catch (err) {
@@ -530,6 +540,9 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleReorderPackingItems = async (reorderedItems: any[]) => {
     if (!selectedTrip) return;
+
+    // Optimistic update
+    setPackingItems(reorderedItems);
 
     const batch = writeBatch(db);
     reorderedItems.forEach((item, index) => {
