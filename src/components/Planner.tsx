@@ -91,6 +91,12 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   const [renameTripTitle, setRenameTripTitle] = useState('');
 
   useEffect(() => {
+    const handleSwitchToMap = () => setMobileView('map');
+    window.addEventListener('switch-to-map', handleSwitchToMap);
+    return () => window.removeEventListener('switch-to-map', handleSwitchToMap);
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
 
     const ensurePublicProfile = async () => {

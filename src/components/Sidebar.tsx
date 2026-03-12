@@ -12,7 +12,7 @@ interface SidebarProps {
   travelMode: string;
   onTravelModeChange: (mode: string) => void;
   selectedItemId: string | null;
-  onSelectItem: (id: string) => void;
+  onSelectItem: (id: string | null) => void;
   tripDays: any[];
   onUpdateTripDays: (days: any[]) => void;
   onUpdateItem: (id: string, updates: any) => void;
@@ -663,6 +663,26 @@ export default function Sidebar({
             <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               {activeTab === 'packing' ? '攜帶清單' : selectedDayId ? `Day ${tripDays.findIndex(d => d.id === selectedDayId) + 1} ${activeTab === 'itinerary' ? '行程列表' : '記帳列表'}` : `所有${activeTab === 'itinerary' ? '行程' : '記帳'}列表`}
             </h3>
+            {activeTab === 'itinerary' && filteredItems.length > 1 && (
+              <button
+                onClick={() => {
+                  onSelectItem(null);
+                  if (window.innerWidth < 640) {
+                    // Find the mobile toggle button and click it, or we can just dispatch a custom event
+                    window.dispatchEvent(new CustomEvent('switch-to-map'));
+                  }
+                }}
+                className={`text-xs flex items-center gap-1 px-2 py-1 rounded-md transition-colors ${
+                  selectedItemId === null
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
+                }`}
+                title="在地圖上顯示完整路線"
+              >
+                <MapPin className="w-3 h-3" />
+                顯示路線
+              </button>
+            )}
             {activeTab === 'expenses' && filteredExpenses.length > 0 && (
               <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md flex items-center gap-1">
                 <span>總計: $</span>
