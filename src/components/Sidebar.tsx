@@ -102,15 +102,31 @@ export default function Sidebar({
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [noteEditingItem, setNoteEditingItem] = useState<any>(null);
   const [noteText, setNoteText] = useState('');
-  const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
+  const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
 
+  // Load from localStorage when trip changes
   useEffect(() => {
-    if (packingItems && packingItems.length > 0) {
-      const allCategories = Array.from(new Set(packingItems.map(item => item.category || '未分類')));
-      // Default collapse all categories
-      setCollapsedCategories(allCategories);
+    if (selectedTrip?.id) {
+      const saved = localStorage.getItem(`expandedCategories_${selectedTrip.id}`);
+      if (saved) {
+        try {
+          setExpandedCategories(JSON.parse(saved));
+        } catch (e) {
+          setExpandedCategories([]);
+        }
+      } else {
+        // Default all categories to collapsed (empty expanded list)
+        setExpandedCategories([]);
+      }
     }
   }, [selectedTrip?.id]);
+
+  // Save to localStorage when state changes
+  useEffect(() => {
+    if (selectedTrip?.id) {
+      localStorage.setItem(`expandedCategories_${selectedTrip.id}`, JSON.stringify(expandedCategories));
+    }
+  }, [expandedCategories, selectedTrip?.id]);
 
   // Expense states
   const [expenseItemName, setExpenseItemName] = useState('');
@@ -329,12 +345,14 @@ export default function Sidebar({
     onUpdatePackingItem(item.id, {
       is_checked: !item.is_checked
     });
-    // Remove the category from collapsedCategories if it was collapsed, 
-    // so it stays expanded when an item inside is toggled.
+    // Ensure the category stays expanded when an item inside is toggled.
     const cat = item.category || '未分類';
-    if (collapsedCategories.includes(cat)) {
-      setCollapsedCategories(prev => prev.filter(c => c !== cat));
-    }
+    setExpandedCategories(prev => {
+      if (!prev.includes(cat)) {
+        return [...prev, cat];
+      }
+      return prev;
+    });
   };
 
   const startEditing = (item: any, e: React.MouseEvent) => {
@@ -944,18 +962,20 @@ export default function Sidebar({
                           return acc;
                         }, {} as Record<string, any[]>);
 
-                        return Object.entries(grouped).map(([category, items]: [string, any[]]) => (
-                          <div key={category} className="mb-4">
-                            <button
-                              onClick={() => setCollapsedCategories(prev => 
-                                prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
-                              )}
-                              className="w-full flex items-center justify-between text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 p-2 bg-slate-100 dark:bg-slate-800 rounded"
-                            >
-                              <span>{category} ({items.filter((i: any) => i.is_checked).length}/{items.length})</span>
-                              <ChevronDown className={`w-4 h-4 transition-transform ${collapsedCategories.includes(category) ? '-rotate-90' : ''}`} />
-                            </button>
-                            {!collapsedCategories.includes(category) && items.map((item) => (
+                        return Object.entries(grouped).map(([category, items]: [string, any[]]) => {
+                          const isCollapsed = !expandedCategories.includes(category);
+                          return (
+                            <div key={category} className="mb-4">
+                              <button
+                                onClick={() => setExpandedCategories(prev => {
+                                  return prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category];
+                                })}
+                                className="w-full flex items-center justify-between text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 p-2 bg-slate-100 dark:bg-slate-800 rounded"
+                              >
+                                <span>{category} ({items.filter((i: any) => i.is_checked).length}/{items.length})</span>
+                                <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                              </button>
+                              {!isCollapsed && items.map((item) => (
                               // @ts-ignore
                               <Draggable key={item.id} draggableId={item.id} index={packingItems.findIndex(i => i.id === item.id)}>
                                 {(provided, snapshot) => (
@@ -1053,7 +1073,8 @@ export default function Sidebar({
                               </Draggable>
                             ))}
                           </div>
-                        ));
+                          );
+                        });
                       })()}
                       {provided.placeholder}
                     </div>
