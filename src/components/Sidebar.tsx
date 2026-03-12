@@ -107,9 +107,10 @@ export default function Sidebar({
   useEffect(() => {
     if (packingItems && packingItems.length > 0) {
       const allCategories = Array.from(new Set(packingItems.map(item => item.category || '未分類')));
+      // Default collapse all categories
       setCollapsedCategories(allCategories);
     }
-  }, [selectedTrip?.id, packingItems]);
+  }, [selectedTrip?.id]);
 
   // Expense states
   const [expenseItemName, setExpenseItemName] = useState('');
@@ -123,7 +124,7 @@ export default function Sidebar({
   // Packing list states
   const [packingItemName, setPackingItemName] = useState('');
   const [packingItemQuantity, setPackingItemQuantity] = useState('1');
-  const [packingItemCategory, setPackingItemCategory] = useState('出行必備');
+  const [packingItemCategory, setPackingItemCategory] = useState('');
   const [editingPackingId, setEditingPackingId] = useState<string | null>(null);
   const [editPackingItemName, setEditPackingItemName] = useState('');
   const [editPackingItemQuantity, setEditPackingItemQuantity] = useState('');
@@ -305,7 +306,7 @@ export default function Sidebar({
     
     setPackingItemName('');
     setPackingItemQuantity('1');
-    setPackingItemCategory('出行必備');
+    setPackingItemCategory('');
   };
 
   const startEditingPacking = (item: any, e: React.MouseEvent) => {
@@ -328,6 +329,12 @@ export default function Sidebar({
     onUpdatePackingItem(item.id, {
       is_checked: !item.is_checked
     });
+    // Remove the category from collapsedCategories if it was collapsed, 
+    // so it stays expanded when an item inside is toggled.
+    const cat = item.category || '未分類';
+    if (collapsedCategories.includes(cat)) {
+      setCollapsedCategories(prev => prev.filter(c => c !== cat));
+    }
   };
 
   const startEditing = (item: any, e: React.MouseEvent) => {
@@ -570,7 +577,7 @@ export default function Sidebar({
                 <input
                   type="text"
                   placeholder="攜帶項目 (例: 護照、充電線)"
-                  className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  className="w-full pl-9 pr-3 py-2 h-10 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={packingItemName}
                   onChange={(e) => setPackingItemName(e.target.value)}
                   onKeyDown={(e) => {
@@ -586,7 +593,7 @@ export default function Sidebar({
                   type="number"
                   min="1"
                   placeholder="數量"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  className="w-full px-3 py-2 h-10 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={packingItemQuantity}
                   onChange={(e) => setPackingItemQuantity(e.target.value)}
                   onKeyDown={(e) => {
@@ -600,10 +607,11 @@ export default function Sidebar({
               <div className="relative flex-1">
                 <input
                   type="text"
-                  placeholder="類別 (例: 出行必備)"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  placeholder="類別"
+                  className="w-full px-3 py-2 h-10 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={packingItemCategory}
                   onChange={(e) => setPackingItemCategory(e.target.value)}
+                  list="category-suggestions"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -611,12 +619,17 @@ export default function Sidebar({
                     }
                   }}
                 />
+                <datalist id="category-suggestions">
+                  {Array.from(new Set([...packingItems.map(item => item.category || '未分類'), '數位電器'])).map(cat => (
+                    <option key={cat} value={cat} />
+                  ))}
+                </datalist>
               </div>
             </div>
             <button
               onClick={handlePackingAdd}
               disabled={!packingItemName.trim() || !packingItemQuantity.trim()}
-              className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+              className="w-full flex items-center justify-center gap-2 h-10 px-4 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
             >
               <Plus className="w-4 h-4" /> 加入清單
             </button>

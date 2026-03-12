@@ -296,6 +296,16 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
       // Add default packing items
       const batch = writeBatch(db);
       const defaultPackingItems = [
+        { name: '內褲', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '襪子', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '上衣', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '內衣', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '裙子', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '睡衣', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '休閒鞋', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '褲子', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '帽子', quantity: 1, is_checked: false, category: '衣服與配飾' },
+        { name: '飾品', quantity: 1, is_checked: false, category: '衣服與配飾' },
         { name: '身分證/護照', quantity: 1, is_checked: false, category: '出行必備' },
         { name: '國際駕照', quantity: 1, is_checked: false, category: '出行必備' },
         { name: '信用卡/現金', quantity: 1, is_checked: false, category: '出行必備' },
@@ -312,6 +322,14 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         { name: '隱形/保養液', quantity: 1, is_checked: false, category: '生活日用' },
         { name: '眼鏡盒', quantity: 1, is_checked: false, category: '生活日用' },
         { name: '購物袋', quantity: 1, is_checked: false, category: '生活日用' },
+        { name: '充電器/充電線', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '耳機', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '行動電源', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '萬國插座', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '相機', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '平板/筆電', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: '延長線', quantity: 1, is_checked: false, category: '數位電器' },
+        { name: 'esim/sim card', quantity: 1, is_checked: false, category: '數位電器' }
       ];
 
       defaultPackingItems.forEach((item, index) => {
@@ -468,7 +486,25 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   const handleAddPackingItem = async (packingData: any) => {
     if (!selectedTrip) return;
     try {
-      await addDoc(collection(db, 'trips', selectedTrip.id, 'packingList'), packingData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/packingList`); throw err; });
+      if (packingData.category === '數位電器') {
+        const digitalItems = [
+          '充電器/充電線', '耳機', '行動電源', '萬國插座', '相機', '平板/筆電', '延長線', 'esim/sim card'
+        ];
+        const batch = writeBatch(db);
+        digitalItems.forEach((name, index) => {
+          const itemRef = doc(collection(db, 'trips', selectedTrip.id, 'packingList'));
+          batch.set(itemRef, {
+            name,
+            quantity: 1,
+            category: '數位電器',
+            is_checked: false,
+            order_index: packingItems.length + index
+          });
+        });
+        await batch.commit();
+      } else {
+        await addDoc(collection(db, 'trips', selectedTrip.id, 'packingList'), packingData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/packingList`); throw err; });
+      }
     } catch (err) {
       console.error('Failed to add packing item', err);
     }
