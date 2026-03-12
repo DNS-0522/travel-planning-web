@@ -458,7 +458,10 @@ export default function Sidebar({
                                 : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
                             }`}
                           >
-                            Day {index + 1}
+                            <div className="flex items-center gap-1">
+                              <span>Day</span>
+                              <span className="notranslate" translate="no">{index + 1}</span>
+                            </div>
                           </button>
                           {tripDays.length > 1 && (
                             <button
@@ -661,8 +664,11 @@ export default function Sidebar({
               {activeTab === 'packing' ? '攜帶清單' : selectedDayId ? `Day ${tripDays.findIndex(d => d.id === selectedDayId) + 1} ${activeTab === 'itinerary' ? '行程列表' : '記帳列表'}` : `所有${activeTab === 'itinerary' ? '行程' : '記帳'}列表`}
             </h3>
             {activeTab === 'expenses' && filteredExpenses.length > 0 && (
-              <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">
-                總計: $ {filteredExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0).toLocaleString()}
+              <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md flex items-center gap-1">
+                <span>總計: $</span>
+                <span className="notranslate" translate="no">
+                  {filteredExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0).toLocaleString()}
+                </span>
               </div>
             )}
           </div>
@@ -707,7 +713,10 @@ export default function Sidebar({
                                 {index + 1}. {item.place_name}
                                 {!selectedDayId && item.day_id && tripDays.findIndex(d => d.id === item.day_id) !== -1 && (
                                   <span className="ml-2 text-xs text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded">
-                                    Day {tripDays.findIndex(d => d.id === item.day_id) + 1}
+                                  <span className="flex items-center gap-1">
+                                    <span>Day</span>
+                                    <span className="notranslate" translate="no">{tripDays.findIndex(d => d.id === item.day_id) + 1}</span>
+                                  </span>
                                   </span>
                                 )}
                               </h4>
@@ -895,7 +904,10 @@ export default function Sidebar({
                                     {expense.item_name}
                                     {!selectedDayId && expense.day_id && tripDays.findIndex(d => d.id === expense.day_id) !== -1 && (
                                       <span className="ml-2 text-xs text-emerald-500 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">
-                                        Day {tripDays.findIndex(d => d.id === expense.day_id) + 1}
+                                      <span className="flex items-center gap-1">
+                                    <span>Day</span>
+                                    <span className="notranslate" translate="no">{tripDays.findIndex(d => d.id === expense.day_id) + 1}</span>
+                                  </span>
                                       </span>
                                     )}
                                   </h4>
@@ -972,7 +984,12 @@ export default function Sidebar({
                                 })}
                                 className="w-full flex items-center justify-between text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 p-2 bg-slate-100 dark:bg-slate-800 rounded"
                               >
-                                <span>{category} ({items.filter((i: any) => i.is_checked).length}/{items.length})</span>
+                                <div className="flex items-center gap-2">
+                                  <span>{category}</span>
+                                  <span className="text-xs bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full notranslate" translate="no">
+                                    {items.filter((i: any) => i.is_checked).length} / {items.length}
+                                  </span>
+                                </div>
                                 <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
                               </button>
                               {!isCollapsed && items.map((item) => (
