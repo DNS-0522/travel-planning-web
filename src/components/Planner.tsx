@@ -395,21 +395,31 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleAddItem = async (itemData: any) => {
     if (!selectedTrip) return;
+    
+    const tempId = `temp-${Date.now()}`;
+    const newItem = { ...itemData, id: tempId };
+    setItems(prev => [...prev, newItem]);
+
     try {
-      const newItem = await addDoc(collection(db, 'trips', selectedTrip.id, 'items'), itemData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/items`); throw err; });
-      setSelectedItemId(newItem.id);
+      const docRef = await addDoc(collection(db, 'trips', selectedTrip.id, 'items'), itemData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/items`); throw err; });
+      setItems(prev => prev.map(item => item.id === tempId ? { ...itemData, id: docRef.id } : item));
+      setSelectedItemId(docRef.id);
     } catch (err) {
       console.error('Failed to add item', err);
+      setItems(prev => prev.filter(item => item.id !== tempId));
     }
   };
 
   const handleDeleteItem = async (itemId: string) => {
     if (!selectedTrip) return;
+    
+    setItems(prev => prev.filter(item => item.id !== itemId));
+    if (selectedItemId === itemId) {
+      setSelectedItemId(null);
+    }
+
     try {
       await deleteDoc(doc(db, 'trips', selectedTrip.id, 'items', itemId)).catch(err => { handleFirestoreError(err, OperationType.DELETE, `trips/${selectedTrip.id}/items/${itemId}`); throw err; });
-      if (selectedItemId === itemId) {
-        setSelectedItemId(null);
-      }
     } catch (err) {
       console.error('Failed to delete item', err);
     }
@@ -430,6 +440,11 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleUpdateItem = async (itemId: string, updates: any) => {
     if (!selectedTrip) return;
+    
+    setItems(prev => prev.map(item => 
+      item.id === itemId ? { ...item, ...updates } : item
+    ));
+
     try {
       await updateDoc(doc(db, 'trips', selectedTrip.id, 'items', itemId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/items/${itemId}`); throw err; });
     } catch (err) {
@@ -439,15 +454,24 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleAddExpense = async (expenseData: any) => {
     if (!selectedTrip) return;
+    
+    const tempId = `temp-${Date.now()}`;
+    const newExpense = { ...expenseData, id: tempId };
+    setExpenses(prev => [...prev, newExpense]);
+
     try {
       await addDoc(collection(db, 'trips', selectedTrip.id, 'expenses'), expenseData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/expenses`); throw err; });
     } catch (err) {
       console.error('Failed to add expense', err);
+      setExpenses(prev => prev.filter(exp => exp.id !== tempId));
     }
   };
 
   const handleDeleteExpense = async (expenseId: string) => {
     if (!selectedTrip) return;
+    
+    setExpenses(prev => prev.filter(exp => exp.id !== expenseId));
+
     try {
       await deleteDoc(doc(db, 'trips', selectedTrip.id, 'expenses', expenseId)).catch(err => { handleFirestoreError(err, OperationType.DELETE, `trips/${selectedTrip.id}/expenses/${expenseId}`); throw err; });
     } catch (err) {
@@ -457,6 +481,11 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleUpdateExpense = async (expenseId: string, updates: any) => {
     if (!selectedTrip) return;
+    
+    setExpenses(prev => prev.map(exp => 
+      exp.id === expenseId ? { ...exp, ...updates } : exp
+    ));
+
     try {
       await updateDoc(doc(db, 'trips', selectedTrip.id, 'expenses', expenseId), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}/expenses/${expenseId}`); throw err; });
     } catch (err) {
@@ -466,6 +495,8 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleReorderExpenses = async (reorderedExpenses: any[]) => {
     if (!selectedTrip) return;
+
+    setExpenses(reorderedExpenses);
 
     const batch = writeBatch(db);
     reorderedExpenses.forEach((expense, index) => {
@@ -485,11 +516,28 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
   const handleAddPackingItem = async (packingData: any) => {
     if (!selectedTrip) return;
+    
+    // Optimistic update for immediate UI feedback
+    const tempId = `temp-${Date.now()}`;
+    const newItem = { ...packingData, id: tempId };
+    
     try {
       if (packingData.category === '數位電器') {
         const digitalItems = [
           '充電器/充電線', '耳機', '行動電源', '萬國插座', '相機', '平板/筆電', '延長線', 'esim/sim card'
         ];
+        
+        // Optimistic update for multiple items
+        const newItems = digitalItems.map((name, index) => ({
+          id: `temp-${Date.now()}-${index}`,
+          name,
+          quantity: 1,
+          category: '數位電器',
+          is_checked: false,
+          order_index: packingItems.length + index
+        }));
+        setPackingItems(prev => [...prev, ...newItems]);
+
         const batch = writeBatch(db);
         digitalItems.forEach((name, index) => {
           const itemRef = doc(collection(db, 'trips', selectedTrip.id, 'packingList'));
@@ -503,10 +551,13 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
         });
         await batch.commit();
       } else {
+        setPackingItems(prev => [...prev, newItem]);
         await addDoc(collection(db, 'trips', selectedTrip.id, 'packingList'), packingData).catch(err => { handleFirestoreError(err, OperationType.CREATE, `trips/${selectedTrip.id}/packingList`); throw err; });
       }
     } catch (err) {
       console.error('Failed to add packing item', err);
+      // Revert optimistic update on error
+      setPackingItems(prev => prev.filter(item => !item.id.toString().startsWith('temp-')));
     }
   };
 
