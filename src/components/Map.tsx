@@ -200,55 +200,59 @@ export default function MapView({ items, travelMode, onTravelModeChange, selecte
 
       {/* Bottom Overlays Container */}
       {!isModalOpen && (
-        <div className="absolute bottom-20 sm:bottom-6 left-4 right-4 z-20 flex items-end justify-between pointer-events-none">
-          
-          {/* Left Side: Weather & Route Sequence */}
-          <div className="flex items-end gap-3 flex-1 min-w-0 justify-start">
-            {/* Weather Widget */}
-            <WeatherWidget city={getTargetCity()} className="relative bottom-auto left-auto" />
+        <>
+          {/* Weather Widget - Positioned to cover Google Maps controls */}
+          <WeatherWidget 
+            city={getTargetCity()} 
+            className="absolute bottom-2 left-2 z-30" 
+          />
+
+          <div className="absolute bottom-20 sm:bottom-6 left-4 right-4 z-20 flex items-end justify-between pointer-events-none">
             
-            {/* Route Sequence Overlay */}
-            {items.length > 1 && (
-              <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-md px-4 py-2 rounded-xl shadow-xl border border-slate-200/50 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar pointer-events-auto h-20 flex-1 max-w-3xl">
-                {items.map((item, index) => {
-                  const isSelected = selectedItemId === item.id;
-                  const isPrev = selectedItemId && items.findIndex(i => i.id === selectedItemId) - 1 === index;
-                  const isFullRoute = !selectedItemId;
-                  const showItem = isFullRoute || isSelected || isPrev;
+            {/* Left Side: Route Sequence */}
+            <div className="flex items-end gap-3 flex-1 min-w-0 justify-start pl-24">
+              {/* Route Sequence Overlay */}
+              {items.length > 1 && (
+                <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-md px-4 py-0 rounded-xl shadow-xl border border-slate-200/50 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar pointer-events-auto h-16 flex-1 max-w-3xl">
+                  {items.map((item, index) => {
+                    const isSelected = selectedItemId === item.id;
+                    const isPrev = selectedItemId && items.findIndex(i => i.id === selectedItemId) - 1 === index;
+                    const isFullRoute = !selectedItemId;
+                    const showItem = isFullRoute || isSelected || isPrev;
 
-                  if (!showItem) return null;
+                    if (!showItem) return null;
 
-                  return (
-                    <React.Fragment key={item.id}>
-                      <div className={`flex items-center gap-1.5 shrink-0 px-2 py-1.5 rounded-lg transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}>
-                        <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                          isSelected || isFullRoute ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-300 dark:bg-slate-600 text-slate-700 dark:text-slate-200'
-                        }`}>
-                          {index + 1}
-                        </span>
-                        <span className={`text-sm ${isSelected ? 'font-bold text-indigo-700 dark:text-indigo-300' : 'font-medium text-slate-700 dark:text-slate-200'}`}>
-                          {item.place_name}
-                        </span>
-                      </div>
-                      {((isFullRoute && index < items.length - 1) || isPrev) ? (
-                        <div className="text-slate-400 dark:text-slate-500 shrink-0 flex items-center">
-                          <ArrowRight className="w-4 h-4" />
+                    return (
+                      <React.Fragment key={item.id}>
+                        <div className={`flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-lg transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}>
+                          <span className={`flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${
+                            isSelected || isFullRoute ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-300 dark:bg-slate-600 text-slate-700 dark:text-slate-200'
+                          }`}>
+                            {index + 1}
+                          </span>
+                          <span className={`text-sm ${isSelected ? 'font-bold text-indigo-700 dark:text-indigo-300' : 'font-medium text-slate-700 dark:text-slate-200'}`}>
+                            {item.place_name}
+                          </span>
                         </div>
-                      ) : null}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                        {((isFullRoute && index < items.length - 1) || isPrev) ? (
+                          <div className="text-slate-400 dark:text-slate-500 shrink-0 flex items-center">
+                            <ArrowRight className="w-4 h-4" />
+                          </div>
+                        ) : null}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
-          {/* Right Side: Place Photo (Real Wikimedia Image) */}
-          {displayItem && (
-            <div className="shrink-0 ml-3 pointer-events-auto group relative hidden sm:block">
-              <div 
-                className="w-20 h-20 bg-white p-1 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 transform transition-transform group-hover:scale-110 group-hover:-rotate-2 origin-bottom-right cursor-pointer flex items-center justify-center overflow-hidden"
-                onClick={() => setIsPhotoModalOpen(true)}
-              >
+            {/* Right Side: Place Photo (Real Wikimedia Image) */}
+            {displayItem && (
+              <div className="shrink-0 ml-3 pointer-events-auto group relative hidden sm:block">
+                <div 
+                  className="w-16 h-16 bg-white p-1 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 transform transition-transform group-hover:scale-110 group-hover:-rotate-2 origin-bottom-right cursor-pointer flex items-center justify-center overflow-hidden"
+                  onClick={() => setIsPhotoModalOpen(true)}
+                >
                 {isLoadingPhoto ? (
                   <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
                 ) : currentPhotoUrl ? (
@@ -268,9 +272,10 @@ export default function MapView({ items, travelMode, onTravelModeChange, selecte
             </div>
           )}
         </div>
-      )}
+      </>
+    )}
 
-      {/* Photo Modal Overlay */}
+    {/* Photo Modal Overlay */}
       {isPhotoModalOpen && displayItem && currentPhotoUrl && (
         <div 
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-sm animate-fade-in"
