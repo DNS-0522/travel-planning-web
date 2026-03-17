@@ -1077,6 +1077,11 @@ export default function Sidebar({
                                       <FileText className="w-3 h-3" /> 有筆記
                                     </span>
                                   )}
+                                  {item.note_images && item.note_images.length > 0 && (
+                                    <span className="flex items-center gap-1 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded italic">
+                                      <ImageIcon className="w-3 h-3" /> 有圖片
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>
