@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus, Edit2 } from 'lucide-react';
+import { LogOut, Plus, Minus, Map as MapIcon, Trash2, X, Sun, Moon, Users, UserPlus, UserMinus, Edit2, Calendar } from 'lucide-react';
+import { createEvents, EventAttributes } from 'ics';
 import Sidebar from './Sidebar';
 import MapView from './Map';
 import { db, auth } from '../firebase';
@@ -85,10 +86,12 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTripTitle, setNewTripTitle] = useState('');
+  const [newTripStartDate, setNewTripStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [tripToDeleteId, setTripToDeleteId] = useState('');
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameTripTitle, setRenameTripTitle] = useState('');
+  const [renameTripStartDate, setRenameTripStartDate] = useState('');
 
   useEffect(() => {
     const handleSwitchToMap = () => setMobileView('map');
@@ -292,12 +295,16 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
     if (!newTripTitle.trim()) return;
 
     try {
-      const newTripRef = await addDoc(collection(db, 'trips'), {
+      const newTrip = {
         title: newTripTitle.trim(),
+        start_date: newTripStartDate,
         user_id: user.uid,
         collaborator_ids: [],
-        days: JSON.stringify([{ id: Date.now().toString(), title: 'Day 1' }])
-      }).catch(err => { handleFirestoreError(err, OperationType.CREATE, 'trips'); throw err; });
+        days: JSON.stringify([{ id: Date.now().toString(), title: 'Day 1' }]),
+        created_at: new Date().toISOString()
+      };
+
+      const newTripRef = await addDoc(collection(db, 'trips'), newTrip).catch(err => { handleFirestoreError(err, OperationType.CREATE, 'trips'); throw err; });
 
       // Add default packing items
       const batch = writeBatch(db);
@@ -351,10 +358,7 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
 
       setSelectedTrip({ 
         id: newTripRef.id, 
-        title: newTripTitle.trim(), 
-        user_id: user.uid, 
-        collaborator_ids: [],
-        days: JSON.stringify([{ id: Date.now().toString(), title: 'Day 1' }]) 
+        ...newTrip
       });
       setIsModalOpen(false);
       setNewTripTitle('');
@@ -387,16 +391,81 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
     if (!selectedTrip || !renameTripTitle.trim()) return;
 
     try {
-      await updateDoc(doc(db, 'trips', selectedTrip.id), {
-        title: renameTripTitle.trim()
-      }).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}`); throw err; });
+      const updates = {
+        title: renameTripTitle.trim(),
+        start_date: renameTripStartDate
+      };
+      await updateDoc(doc(db, 'trips', selectedTrip.id), updates).catch(err => { handleFirestoreError(err, OperationType.UPDATE, `trips/${selectedTrip.id}`); throw err; });
 
-      setSelectedTrip({ ...selectedTrip, title: renameTripTitle.trim() });
+      setSelectedTrip({ ...selectedTrip, ...updates });
       setIsRenameModalOpen(false);
       setRenameTripTitle('');
     } catch (error) {
       console.error('Error renaming trip:', error);
     }
+  };
+
+  const handleExportICS = () => {
+    if (!selectedTrip || items.length === 0) {
+      alert('沒有行程可以匯出');
+      return;
+    }
+
+    let startDate: Date;
+    if (selectedTrip.start_date) {
+      const [y, m, d] = selectedTrip.start_date.split('-').map(Number);
+      startDate = new Date(y, m - 1, d);
+    } else {
+      startDate = new Date();
+      startDate.setHours(0, 0, 0, 0);
+    }
+    const tripDaysList = getTripDays();
+
+    const events: EventAttributes[] = items.map(item => {
+      const dayIndex = tripDaysList.findIndex((d: any) => d.id === item.day_id);
+      const eventDate = new Date(startDate);
+      if (dayIndex !== -1) {
+        eventDate.setDate(eventDate.getDate() + dayIndex);
+      }
+
+      const [hours, minutes] = (item.travel_time || '08:00').split(':').map(Number);
+      const durationMinutes = parseInt(item.stay_duration || '60');
+
+      const start: [number, number, number, number, number] = [
+        eventDate.getFullYear(),
+        eventDate.getMonth() + 1,
+        eventDate.getDate(),
+        hours,
+        minutes
+      ];
+
+      return {
+        start,
+        duration: { minutes: durationMinutes },
+        title: item.place_name,
+        description: item.notes || '',
+        location: item.address || '',
+        status: 'CONFIRMED',
+        busyStatus: 'BUSY'
+      };
+    });
+
+    createEvents(events, (error, value) => {
+      if (error) {
+        console.error(error);
+        alert('匯出失敗');
+        return;
+      }
+
+      const blob = new Blob([value], { type: 'text/calendar;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${selectedTrip.title}.ics`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
   };
 
   const handleAddItem = async (itemData: any) => {
@@ -619,12 +688,16 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
   const handleReorderItems = async (reorderedItems: any[]) => {
     if (!selectedTrip) return;
 
+    // Update local state immediately for smooth UI
+    setItems(reorderedItems);
+
     const batch = writeBatch(db);
     reorderedItems.forEach((item, index) => {
       const itemRef = doc(db, 'trips', selectedTrip.id, 'items', item.id);
       batch.update(itemRef, {
         order_index: index,
         day_id: item.day_id,
+        travel_time: item.travel_time || '',
       });
     });
 
@@ -690,6 +763,7 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                   <button
                     onClick={() => {
                       setRenameTripTitle(selectedTrip.title);
+                      setRenameTripStartDate(selectedTrip.start_date || new Date().toISOString().split('T')[0]);
                       setIsRenameModalOpen(true);
                     }}
                     className="p-1.5 hover:bg-white/20 rounded-full transition-colors"
@@ -779,6 +853,7 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
                 onReorderPackingItems={handleReorderPackingItems}
                 activeTab={activeSidebarTab}
                 setActiveTab={setActiveSidebarTab}
+                onExportICS={handleExportICS}
               />
             </div>
             <div className={`${mobileView === 'map' ? 'block' : 'hidden'} sm:block flex-1 relative h-full`}>
@@ -834,19 +909,33 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
               </button>
             </div>
             <form onSubmit={handleCreateTrip} className="p-4">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  行程名稱
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="例如：日本五日遊"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={newTripTitle}
-                  onChange={(e) => setNewTripTitle(e.target.value)}
-                />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    行程名稱
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="例如：日本五日遊"
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newTripTitle}
+                    onChange={(e) => setNewTripTitle(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    開始日期
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newTripStartDate}
+                    onChange={(e) => setNewTripStartDate(e.target.value)}
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-3">
                 <button
@@ -882,19 +971,33 @@ export default function Planner({ token, user, onLogout, theme, onToggleTheme }:
               </button>
             </div>
             <form onSubmit={handleRenameTrip} className="p-4">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  行程名稱
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="例如：日本五日遊"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={renameTripTitle}
-                  onChange={(e) => setRenameTripTitle(e.target.value)}
-                />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    行程名稱
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="例如：日本五日遊"
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={renameTripTitle}
+                    onChange={(e) => setRenameTripTitle(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    開始日期
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={renameTripStartDate}
+                    onChange={(e) => setRenameTripStartDate(e.target.value)}
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-3">
                 <button

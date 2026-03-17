@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult, DraggableProvided, DraggableStateSnapshot } from '@hello-pangea/dnd';
-import { GripVertical, Trash2, MapPin, Clock, Calendar, Plus, X, Edit2, Check, ChevronDown, FileText, Wallet, Banknote, User } from 'lucide-react';
+import { GripVertical, Trash2, MapPin, Clock, Calendar, Plus, X, Edit2, Check, ChevronDown, FileText, Wallet, Banknote, User, Image as ImageIcon, Loader2, Zap, AlertTriangle } from 'lucide-react';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../firebase';
 
 interface SidebarProps {
   selectedTrip: any;
@@ -30,6 +32,7 @@ interface SidebarProps {
   onReorderPackingItems: (items: any[]) => void;
   activeTab: 'itinerary' | 'expenses' | 'packing';
   setActiveTab: (tab: 'itinerary' | 'expenses' | 'packing') => void;
+  onExportICS?: () => void;
 }
 
 const TimeSelector = ({ value, onChange, className }: { value: string, onChange: (val: string) => void, className?: string }) => {
@@ -92,6 +95,7 @@ export default function Sidebar({
   onReorderPackingItems,
   activeTab,
   setActiveTab,
+  onExportICS,
 }: SidebarProps) {
   const [stayDuration, setStayDuration] = useState('');
   const [travelTime, setTravelTime] = useState('');
@@ -99,9 +103,12 @@ export default function Sidebar({
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editStayDuration, setEditStayDuration] = useState('');
   const [editTravelTime, setEditTravelTime] = useState('');
+  const [editPlaceName, setEditPlaceName] = useState('');
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [noteEditingItem, setNoteEditingItem] = useState<any>(null);
   const [noteText, setNoteText] = useState('');
+  const [noteImages, setNoteImages] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
 
   // Load from localStorage when trip changes
@@ -142,6 +149,7 @@ export default function Sidebar({
   const [packingItemQuantity, setPackingItemQuantity] = useState('1');
   const [packingItemCategory, setPackingItemCategory] = useState('');
   const [editingPackingId, setEditingPackingId] = useState<string | null>(null);
+  const [timeWarning, setTimeWarning] = useState<string | null>(null);
   const [editPackingItemName, setEditPackingItemName] = useState('');
   const [editPackingItemQuantity, setEditPackingItemQuantity] = useState('');
   const [editPackingItemCategory, setEditPackingItemCategory] = useState('');
@@ -155,7 +163,10 @@ export default function Sidebar({
     const date = new Date();
     date.setHours(hours, minutes + duration, 0);
     
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${h}:${m}`;
   };
 
   const roundToNearest5 = (timeStr: string) => {
@@ -187,8 +198,80 @@ export default function Sidebar({
     }
   }, [tripDays, selectedDayId]);
 
+  const handleAutoSchedule = () => {
+    if (!selectedDayId || filteredItems.length < 2) return;
+    
+    // Use the current array order (visual order) instead of sorting by order_index
+    // because order_index might be stale during a reorder operation.
+    const dayItems = [...filteredItems];
+    
+    // Start with the first item's time or default to 08:00
+    let lastTime = dayItems[0].travel_time || '08:00';
+    
+    // Create a map for quick lookup of updated times
+    const timeUpdates: Record<string, string> = {};
+    
+    for (let i = 1; i < dayItems.length; i++) {
+      const prevItem = dayItems[i-1];
+      // Use the updated time for the previous item if we just calculated it
+      const startTime = i === 1 ? lastTime : timeUpdates[prevItem.id];
+      
+      // Use 0 if duration is not set, instead of defaulting to 60
+      const duration = parseInt(prevItem.stay_duration, 10) || 0;
+      
+      const [h, m] = startTime.split(':').map(Number);
+      const date = new Date();
+      date.setHours(h, m + duration, 0);
+      
+      // Round to nearest 5 minutes for a cleaner schedule
+      const mins = date.getMinutes();
+      const roundedMins = Math.round(mins / 5) * 5;
+      date.setMinutes(roundedMins);
+      
+      const nextTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+      timeUpdates[dayItems[i].id] = nextTime;
+    }
+    
+    // Apply updates to the full items list
+    const updatedItems = items.map(item => {
+      if (timeUpdates[item.id]) {
+        return { ...item, travel_time: timeUpdates[item.id] };
+      }
+      return item;
+    });
+    
+    onReorder(updatedItems);
+  };
+
   const handlePlaceAdd = () => {
     if (inputValue.trim()) {
+      // Time validation check
+      if (selectedDayId && filteredItems.length > 0 && travelTime) {
+        const dayItems = [...filteredItems].sort((a, b) => a.order_index - b.order_index);
+        const lastItem = dayItems[dayItems.length - 1];
+        
+        if (lastItem.travel_time && lastItem.stay_duration) {
+          const [lastH, lastM] = lastItem.travel_time.split(':').map(Number);
+          const lastDuration = parseInt(lastItem.stay_duration, 10) || 0;
+          const lastEndTime = new Date();
+          lastEndTime.setHours(lastH, lastM + lastDuration, 0);
+          
+          const [newH, newM] = travelTime.split(':').map(Number);
+          const newStartTime = new Date();
+          newStartTime.setHours(newH, newM, 0);
+          
+          if (newStartTime < lastEndTime) {
+            const endTimeStr = `${String(lastEndTime.getHours()).padStart(2, '0')}:${String(lastEndTime.getMinutes()).padStart(2, '0')}`;
+            const warningMsg = `時間衝突：開始時間 (${travelTime}) 早於上一個行程的結束時間 (${endTimeStr})`;
+            
+            if (timeWarning !== warningMsg) {
+              setTimeWarning(warningMsg);
+              return; // Stop and show warning
+            }
+          }
+        }
+      }
+
       onAddItem({
         trip_id: selectedTrip.id,
         place_name: inputValue.trim(),
@@ -203,6 +286,7 @@ export default function Sidebar({
       setInputValue('');
       setStayDuration('');
       setTravelTime('');
+      setTimeWarning(null);
     }
   };
 
@@ -229,6 +313,25 @@ export default function Sidebar({
   const filteredExpenses = selectedDayId
     ? expenses.filter(exp => exp.day_id === selectedDayId)
     : expenses;
+
+  const hasConflict = (index: number) => {
+    if (index === 0 || activeTab !== 'itinerary') return false;
+    const prevItem = filteredItems[index - 1];
+    const currentItem = filteredItems[index];
+    
+    if (!prevItem.travel_time || !prevItem.stay_duration || !currentItem.travel_time) return false;
+    
+    const [prevH, prevM] = prevItem.travel_time.split(':').map(Number);
+    const prevDuration = parseInt(prevItem.stay_duration, 10) || 0;
+    const prevEndTime = new Date();
+    prevEndTime.setHours(prevH, prevM + prevDuration, 0);
+    
+    const [currH, currM] = currentItem.travel_time.split(':').map(Number);
+    const currStartTime = new Date();
+    currStartTime.setHours(currH, currM, 0);
+    
+    return currStartTime < prevEndTime;
+  };
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
@@ -358,6 +461,7 @@ export default function Sidebar({
   const startEditing = (item: any, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingItemId(item.id);
+    setEditPlaceName(item.place_name || '');
     setEditStayDuration(item.stay_duration || '');
     setEditTravelTime(item.travel_time || '');
   };
@@ -365,6 +469,7 @@ export default function Sidebar({
   const saveEditing = (item: any, e: React.MouseEvent) => {
     e.stopPropagation();
     onUpdateItem(item.id, {
+      place_name: editPlaceName,
       stay_duration: editStayDuration,
       travel_time: editTravelTime,
       day_id: item.day_id,
@@ -376,13 +481,100 @@ export default function Sidebar({
     e.stopPropagation();
     setNoteEditingItem(item);
     setNoteText(item.notes || '');
+    setNoteImages(item.note_images || []);
     setIsNotesModalOpen(true);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!selectedTrip?.id) {
+      alert('請先選擇一個行程');
+      return;
+    }
+
+    // Limit original file size to 10MB for processing
+    if (file.size > 10 * 1024 * 1024) {
+      alert('圖片原始檔案太大，請選擇較小的圖片');
+      return;
+    }
+
+    setIsUploading(true);
+    console.log('Processing image as Base64 to bypass CORS...');
+    
+    try {
+      const reader = new FileReader();
+      
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            // Use canvas to resize and compress the image
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            
+            // Max dimension 1000px
+            const MAX_SIZE = 1000;
+            if (width > height) {
+              if (width > MAX_SIZE) {
+                height *= MAX_SIZE / width;
+                width = MAX_SIZE;
+              }
+            } else {
+              if (height > MAX_SIZE) {
+                width *= MAX_SIZE / height;
+                height = MAX_SIZE;
+              }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            // Compress to JPEG with 0.7 quality
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            resolve(dataUrl);
+          };
+          img.onerror = reject;
+          img.src = event.target?.result as string;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const base64String = await base64Promise;
+      
+      // Check if the compressed string is too large for Firestore (approx 1MB limit per doc)
+      // We'll keep it under 600KB to be safe since there might be multiple images
+      if (base64String.length > 800000) {
+        alert('圖片壓縮後仍然太大，請嘗試更小的圖片');
+        setIsUploading(false);
+        return;
+      }
+
+      setNoteImages(prev => [...prev, base64String]);
+      console.log('Image processed and added as Base64');
+    } catch (error: any) {
+      console.error('Error processing image:', error);
+      alert(`圖片處理失敗: ${error.message || '未知錯誤'}`);
+    } finally {
+      setIsUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const removeNoteImage = (index: number) => {
+    setNoteImages(prev => prev.filter((_, i) => i !== index));
   };
 
   const saveNotes = () => {
     if (noteEditingItem) {
       onUpdateItem(noteEditingItem.id, {
-        notes: noteText
+        notes: noteText,
+        note_images: noteImages
       });
       setIsNotesModalOpen(false);
       setNoteEditingItem(null);
@@ -508,7 +700,10 @@ export default function Sidebar({
                 placeholder="輸入地點名稱 (例: 東京車站)"
                 className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  if (timeWarning) setTimeWarning(null);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -527,14 +722,20 @@ export default function Sidebar({
                   placeholder="停留時間 (分鐘)"
                   className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={stayDuration}
-                  onChange={(e) => setStayDuration(e.target.value)}
+                  onChange={(e) => {
+                    setStayDuration(e.target.value);
+                    if (timeWarning) setTimeWarning(null);
+                  }}
                 />
               </div>
               <div className="relative flex-1">
                 <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 z-10" />
                 <TimeSelector 
                   value={travelTime} 
-                  onChange={(val) => setTravelTime(val)} 
+                  onChange={(val) => {
+                    setTravelTime(val);
+                    if (timeWarning) setTimeWarning(null);
+                  }} 
                   className="pl-9 h-[38px]"
                 />
               </div>
@@ -547,6 +748,37 @@ export default function Sidebar({
             >
               <Plus className="w-4 h-4" /> 加入行程
             </button>
+            {timeWarning && (
+              <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-[11px] text-amber-700 dark:text-amber-400 flex items-start gap-1.5 animate-in fade-in slide-in-from-top-1">
+                <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-bold">時間提醒</p>
+                  <p>{timeWarning}</p>
+                  <button 
+                    onClick={() => {
+                      onAddItem({
+                        trip_id: selectedTrip.id,
+                        place_name: inputValue.trim(),
+                        lat: 0,
+                        lng: 0,
+                        order_index: items.length,
+                        stay_duration: stayDuration,
+                        travel_time: travelTime,
+                        day_id: selectedDayId,
+                        notes: '',
+                      });
+                      setInputValue('');
+                      setStayDuration('');
+                      setTravelTime('');
+                      setTimeWarning(null);
+                    }}
+                    className="mt-1 text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                  >
+                    忽略並強制加入
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : activeTab === 'expenses' ? (
           <div className="space-y-3">
@@ -663,26 +895,46 @@ export default function Sidebar({
             <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               {activeTab === 'packing' ? '攜帶清單' : selectedDayId ? `Day ${tripDays.findIndex(d => d.id === selectedDayId) + 1} ${activeTab === 'itinerary' ? '行程列表' : '記帳列表'}` : `所有${activeTab === 'itinerary' ? '行程' : '記帳'}列表`}
             </h3>
-            {activeTab === 'itinerary' && filteredItems.length > 1 && (
-              <button
-                onClick={() => {
-                  onSelectItem(null);
-                  if (window.innerWidth < 640) {
-                    // Find the mobile toggle button and click it, or we can just dispatch a custom event
-                    window.dispatchEvent(new CustomEvent('switch-to-map'));
-                  }
-                }}
-                className={`text-xs flex items-center gap-1 px-2 py-1 rounded-md transition-colors ${
-                  selectedItemId === null
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
-                }`}
-                title="在地圖上顯示完整路線"
-              >
-                <MapPin className="w-3 h-3" />
-                顯示路線
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {activeTab === 'itinerary' && onExportICS && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleAutoSchedule}
+                    disabled={filteredItems.length < 2}
+                    className="p-1 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors bg-white dark:bg-slate-800 rounded-md shadow-sm border border-slate-200 dark:border-slate-700 disabled:opacity-30"
+                    title="自動串連時間 (依序排列並根據停留時間自動銜接)"
+                  >
+                    <Zap className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={onExportICS}
+                    className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors bg-white dark:bg-slate-800 rounded-md shadow-sm border border-slate-200 dark:border-slate-700"
+                    title="匯出至行事曆 (ICS)"
+                  >
+                    <Calendar className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              {activeTab === 'itinerary' && filteredItems.length > 1 && (
+                <button
+                  onClick={() => {
+                    onSelectItem(null);
+                    if (window.innerWidth < 640) {
+                      window.dispatchEvent(new CustomEvent('switch-to-map'));
+                    }
+                  }}
+                  className={`text-xs flex items-center gap-1 px-2 py-1 rounded-md transition-colors ${
+                    selectedItemId === null
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-slate-200 dark:border-slate-700'
+                  }`}
+                  title="在地圖上顯示完整路線"
+                >
+                  <MapPin className="w-3 h-3" />
+                  顯示路線
+                </button>
+              )}
+            </div>
             {activeTab === 'expenses' && filteredExpenses.length > 0 && (
               <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md flex items-center gap-1">
                 <span>總計: $</span>
@@ -717,9 +969,11 @@ export default function Sidebar({
                             className={`bg-white dark:bg-slate-800 border rounded-lg shadow-sm p-3 flex items-start gap-3 transition-colors cursor-pointer ${
                               snapshot.isDragging 
                                 ? 'border-indigo-500 shadow-md ring-1 ring-indigo-500' 
-                                : selectedItemId === item.id 
-                                  ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900 bg-indigo-50/30 dark:bg-indigo-900/10' 
-                                  : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700'
+                                : hasConflict(index)
+                                  ? 'border-red-500 ring-2 ring-red-100 dark:ring-red-900/30 bg-red-50/10'
+                                  : selectedItemId === item.id 
+                                    ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900 bg-indigo-50/30 dark:bg-indigo-900/10' 
+                                    : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700'
                             }`}
                           >
                             <div
@@ -740,9 +994,24 @@ export default function Sidebar({
                                   </span>
                                 )}
                               </h4>
+                              {hasConflict(index) && (
+                                <div className="mt-0.5 flex items-center gap-1 text-[10px] text-red-600 dark:text-red-400 font-bold">
+                                  <AlertTriangle className="w-3 h-3" /> 時間衝突：早於上一個行程結束
+                                </div>
+                              )}
                               
                               {editingItemId === item.id ? (
                                 <div className="mt-2 space-y-2" onClick={e => e.stopPropagation()}>
+                                  <div className="flex items-center gap-2">
+                                    <MapPin className="w-4 h-4 text-slate-400" />
+                                    <input
+                                      type="text"
+                                      placeholder="地點名稱"
+                                      className="flex-1 px-2 py-1 text-xs border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                      value={editPlaceName}
+                                      onChange={(e) => setEditPlaceName(e.target.value)}
+                                    />
+                                  </div>
                                   <div className="flex items-center gap-2">
                                     <Clock className="w-4 h-4 text-slate-400" />
                                     <input
@@ -783,7 +1052,11 @@ export default function Sidebar({
                               ) : (
                                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
                                   {item.travel_time && (
-                                    <span className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                                    <span className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+                                      hasConflict(index) 
+                                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 font-bold' 
+                                        : 'bg-slate-100 dark:bg-slate-700'
+                                    }`}>
                                       <Clock className="w-3 h-3" /> {item.travel_time}
                                       {item.stay_duration && (
                                         <>
@@ -823,7 +1096,7 @@ export default function Sidebar({
                                 <button
                                   onClick={(e) => startEditing(item, e)}
                                   className="text-slate-400 dark:text-slate-500 hover:text-indigo-500 p-1 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
-                                  title="編輯時間"
+                                  title="編輯行程"
                                 >
                                   <Edit2 className="w-4 h-4" />
                                 </button>
@@ -1142,14 +1415,47 @@ export default function Sidebar({
               </button>
             </div>
             
-            <div className="p-4 flex-1 overflow-y-auto">
+            <div className="p-4 flex-1 overflow-y-auto space-y-4">
               <textarea
-                className="w-full h-64 p-3 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
+                className="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
                 placeholder="在此輸入詳細筆記、預約資訊、交通方式等..."
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
                 autoFocus
               />
+              
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4" /> 圖片備註
+                  </h4>
+                  <label className={`cursor-pointer flex items-center gap-1 text-xs font-medium px-2 py-1 rounded transition-colors ${isUploading ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400'}`}>
+                    {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    上傳圖片
+                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={isUploading} />
+                  </label>
+                </div>
+                
+                {noteImages.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {noteImages.map((url, index) => (
+                      <div key={index} className="relative group aspect-video rounded-md overflow-hidden border border-slate-200 dark:border-slate-700">
+                        <img src={url} alt={`Note ${index}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <button
+                          onClick={() => removeNoteImage(index)}
+                          className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-md text-slate-400 text-xs">
+                    尚未上傳任何圖片
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
