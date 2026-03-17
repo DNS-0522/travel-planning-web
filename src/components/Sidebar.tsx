@@ -110,6 +110,7 @@ export default function Sidebar({
   const [noteImages, setNoteImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   // Load from localStorage when trip changes
   useEffect(() => {
@@ -1439,11 +1440,20 @@ export default function Sidebar({
                 {noteImages.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {noteImages.map((url, index) => (
-                      <div key={index} className="relative group aspect-video rounded-md overflow-hidden border border-slate-200 dark:border-slate-700">
-                        <img src={url} alt={`Note ${index}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      <div key={index} className="relative group aspect-video rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer">
+                        <img 
+                          src={url} 
+                          alt={`Note ${index}`} 
+                          className="w-full h-full object-cover hover:scale-110 transition-transform duration-300" 
+                          referrerPolicy="no-referrer" 
+                          onClick={() => setPreviewImageUrl(url)}
+                        />
                         <button
-                          onClick={() => removeNoteImage(index)}
-                          className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeNoteImage(index);
+                          }}
+                          className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -1473,6 +1483,28 @@ export default function Sidebar({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Image Preview Modal */}
+      {previewImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/90 flex items-center justify-center z-[200] p-4 cursor-zoom-out"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <button 
+            className="absolute top-4 right-4 text-white/70 hover:text-white p-2 bg-white/10 rounded-full transition-colors"
+            onClick={() => setPreviewImageUrl(null)}
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img 
+            src={previewImageUrl} 
+            alt="Preview" 
+            className="max-w-full max-h-full object-contain shadow-2xl animate-in zoom-in-95 duration-200"
+            referrerPolicy="no-referrer"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
